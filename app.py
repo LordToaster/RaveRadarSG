@@ -17,7 +17,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-DB_NAME = "raveradar.db"
+DB_NAME = "raveradarv2.db"
 
 def init_db():
     """Initializes the database structure with Country support."""
