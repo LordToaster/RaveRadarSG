@@ -1,4 +1,4 @@
- import streamlit as st
+import streamlit as st
 import sqlite3
 import pandas as pd
 import requests
@@ -18,8 +18,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Incremented database name to load all the new regional pre-sets
-DB_NAME = "raveradar_final.db"
+# Incremented database name to v5 to add Vietnam to the tracking schema
+DB_NAME = "raveradar_v5.db"
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
@@ -88,7 +88,8 @@ st.caption("The ultimate underground hub. Filtered by sound, completely decentra
 
 tabs = st.tabs(["🎵 Upcoming Raves", "🏢 Venue & Promoter Directory", "➕ Add Event/Venue"])
 
-COUNTRIES_LIST = ["Singapore", "Malaysia", "Thailand", "Indonesia", "Japan", "South Korea", "Philippines"]
+# Included Vietnam in the core list
+COUNTRIES_LIST = ["Singapore", "Malaysia", "Thailand", "Indonesia", "Vietnam", "Japan", "South Korea", "Philippines"]
 
 GENRES_LIST = [
     "Techno", "Hard Techno", "Industrial", "Hardgroove", "Peak-Time (Drumcode)", 
