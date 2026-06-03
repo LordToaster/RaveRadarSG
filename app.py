@@ -4,6 +4,7 @@ import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 import re
+import random
 
 # --- CONFIGURATION & PAGE SETUP ---
 st.set_page_config(page_title="RaveRadar SE Asia", page_icon="⚡", layout="centered")
@@ -15,11 +16,16 @@ st.markdown("""
     .stButton>button { background-color: #bc34fa; color: white; border-radius: 8px; width: 100%; }
     .stButton>button:hover { background-color: #9a24cf; color: white; }
     .event-card { background-color: #161824; padding: 15px; border-radius: 10px; margin-bottom: 12px; border-left: 4px solid #bc34fa; }
+    .fallback-card { background-color: #1d1424; padding: 12px; border-radius: 8px; margin-bottom: 8px; border: 1px solid #bc34fa; }
     </style>
 """, unsafe_allow_html=True)
 
-# Updated to database version v9
-DB_NAME = "raveradar_v9.db"
+# Upgraded database to v11
+DB_NAME = "raveradar_v11.db"
+
+# OPTIONAL: If RA continues to block you, sign up for a free account at ScraperAPI.com
+# Paste your API key string below (e.g., "abc123xyz") to easily route through residential IPs.
+SCRAPER_API_KEY = "" 
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
@@ -97,19 +103,41 @@ GENRES_LIST = [
 
 def fetch_single_ra_venue(ra_id, venue_name, country):
     events = []
-    url = f"https://ra.co/clubs/{ra_id}"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+    
+    # Target the unprotected widget gateway instead of the main heavy web page
+    target_url = f"https://ra.co/widget/club/{ra_id}"
+    
+    # Rotate standard mobile user agents to mimic real traffic patterns
+    user_agents = [
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
+        "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+    ]
+    
+    headers = {
+        "User-Agent": random.choice(user_agents),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+        "Referer": "https://ra.co/"
+    }
+    
+    # Executed if a proxy key is present
+    if SCRAPER_API_KEY:
+        final_url = f"http://api.scraperapi.com?api_key={SCRAPER_API_KEY}&url={target_url}"
+    else:
+        final_url = target_url
+
     try:
-        r = requests.get(url, headers=headers, timeout=5)
+        r = requests.get(final_url, headers=headers, timeout=8)
         if r.status_code == 200:
             soup = BeautifulSoup(r.text, 'html.parser')
-            # Updated pattern: Capture ANY event link regardless of structural changes
+            
+            # Extract links out of the simpler widget framework
             for a_tag in soup.find_all('a', href=re.compile(r'/events/')):
                 title_text = a_tag.get_text(strip=True)
                 href = a_tag['href']
                 
-                # Cleanup and ignore generic navigation/footer blocks
-                if title_text and len(title_text) > 6 and not any(x in title_text.lower() for x in ["view all", "submit", "tickets", "terms", "privacy", "cookie"]):
+                if title_text and len(title_text) > 4 and not any(x in title_text.lower() for x in ["view all", "tickets", "terms", "privacy"]):
                     full_url = href if href.startswith('http') else f"https://ra.co{href}"
                     events.append({
                         "title": title_text,
@@ -123,7 +151,7 @@ def fetch_single_ra_venue(ra_id, venue_name, country):
         pass
     return events
 
-@st.cache_data(ttl=7200) # Caches results for 2 hours to avoid secondary rate limits
+@st.cache_data(ttl=10800) # 3-hour cache hold
 def load_all_automated_events(venues_list):
     compiled_events = []
     for ra_id, name, country in venues_list:
@@ -158,7 +186,6 @@ with tabs[0]:
         if country_filter != "All Countries" and ev['country'] != country_filter:
             continue
             
-        # Refined Smart Text-Matching
         if genre_filter != "All Genres":
             title_clean = ev['title'].lower()
             filter_clean = genre_filter.lower()
@@ -181,7 +208,19 @@ with tabs[0]:
         st.link_button("Get Event Info / Tickets", ev['ticket_url'])
 
     if display_count == 0:
-        st.info("No active events found matching those exact filters. Head to the 'Add' tab to publish one!")
+        st.warning("⚠️ Cloudflare is shielding RA. Use the custom venue calendar directories below or submit a manual event entry:")
+        
+        st.markdown("### 🏢 Instant Venue Calendars")
+        for ra_id, v_name, v_country in venues_to_scan:
+            if country_filter != "All Countries" and v_country != country_filter:
+                continue
+            st.markdown(f"""
+                <div class="fallback-card">
+                    <span style="float:right; background:#bc34fa; padding:1px 6px; border-radius:4px; font-size:10px; color:white;">{v_country}</span>
+                    <strong style="color:#ffffff;">{v_name}</strong>
+                </div>
+            """, unsafe_allow_html=True)
+            st.link_button(f"Open {v_name} Calendar", f"https://ra.co/clubs/{ra_id}")
 
 # --- TAB 2: VENUE DIRECTORY ---
 with tabs[1]:
@@ -201,8 +240,8 @@ with tabs[2]:
     
     if option == "Single Event Announcement":
         with st.form("event_form", clear_on_submit=True):
-            t = st.text_input("Event Name (e.g., Verknipt KL / Joyhauser Extended)")
-            v = st.text_input("Venue & Location Details (e.g., Tuff Club, Singapore)")
+            t = st.text_input("Event Name (e.g., Verknipt KL)")
+            v = st.text_input("Venue & Location Details (e.g., Tuff Club)")
             c = st.selectbox("Country Location", COUNTRIES_LIST)
             g = st.selectbox("Primary Sound/Genre", GENRES_LIST)
             d = st.date_input("Event Date")
@@ -212,7 +251,7 @@ with tabs[2]:
                 if t and v and link:
                     cursor.execute("INSERT INTO manual_events (title, venue, country, genre, date, ticket_url) VALUES (?,?,?,?,?,?)", (t, v, c, g, str(d), link))
                     conn.commit()
-                    st.success("🎉 Event successfully uploaded and categorized!")
+                    st.success("🎉 Event successfully uploaded!")
                     st.clear_cache() 
                     st.rerun()
                     
@@ -221,13 +260,12 @@ with tabs[2]:
             name = st.text_input("Club or Promoter Name")
             country = st.selectbox("Base Country", COUNTRIES_LIST)
             ra_id = st.text_input("Resident Advisor Club ID Number")
-            st.caption("Tip: If the web address is ra.co/clubs/154508, the ID number is 154508.")
             
             if st.form_submit_button("Add Venue to Tracker"):
                 if name:
                     cursor.execute("INSERT INTO venues (name, country, resident_advisor_id) VALUES (?,?,?)", (name, country, ra_id))
                     conn.commit()
-                    st.success(f"Successfully added {name} to the core scanning rotation!")
+                    st.success(f"Successfully added {name}!")
                     st.clear_cache()
                     st.rerun()
                     
