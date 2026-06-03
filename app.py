@@ -18,8 +18,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Incremented database name to v8 to perfectly isolate the working data tables
-DB_NAME = "raveradar_v8.db"
+# Updated to database version v9
+DB_NAME = "raveradar_v9.db"
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
@@ -98,28 +98,32 @@ GENRES_LIST = [
 def fetch_single_ra_venue(ra_id, venue_name, country):
     events = []
     url = f"https://ra.co/clubs/{ra_id}"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
     try:
-        r = requests.get(url, headers=headers, timeout=4)
+        r = requests.get(url, headers=headers, timeout=5)
         if r.status_code == 200:
             soup = BeautifulSoup(r.text, 'html.parser')
-            for a_tag in soup.find_all('a', href=re.compile(r'/events/\d+')):
+            # Updated pattern: Capture ANY event link regardless of structural changes
+            for a_tag in soup.find_all('a', href=re.compile(r'/events/')):
                 title_text = a_tag.get_text(strip=True)
-                if title_text and len(title_text) > 5 and "PRV" not in title_text:
-                    # Clean dictionary structure closing bracket error resolved here
+                href = a_tag['href']
+                
+                # Cleanup and ignore generic navigation/footer blocks
+                if title_text and len(title_text) > 6 and not any(x in title_text.lower() for x in ["view all", "submit", "tickets", "terms", "privacy", "cookie"]):
+                    full_url = href if href.startswith('http') else f"https://ra.co{href}"
                     events.append({
                         "title": title_text,
                         "venue": venue_name,
                         "country": country,
                         "genre": "Techno",  
                         "date": "Upcoming Lineup",
-                        "ticket_url": f"https://ra.co{a_tag['href']}"
+                        "ticket_url": full_url
                     })
     except Exception:
         pass
     return events
 
-@st.cache_data(ttl=14400) 
+@st.cache_data(ttl=7200) # Caches results for 2 hours to avoid secondary rate limits
 def load_all_automated_events(venues_list):
     compiled_events = []
     for ra_id, name, country in venues_list:
@@ -154,7 +158,7 @@ with tabs[0]:
         if country_filter != "All Countries" and ev['country'] != country_filter:
             continue
             
-        # Smart Text-Matching Genre Overrides
+        # Refined Smart Text-Matching
         if genre_filter != "All Genres":
             title_clean = ev['title'].lower()
             filter_clean = genre_filter.lower()
