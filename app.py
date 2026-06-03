@@ -18,8 +18,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Bumped database name to v7 for clean filter initialization
-DB_NAME = "raveradar_v7.db"
+# Incremented database name to v8 to perfectly isolate the working data tables
+DB_NAME = "raveradar_v8.db"
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
@@ -106,7 +106,125 @@ def fetch_single_ra_venue(ra_id, venue_name, country):
             for a_tag in soup.find_all('a', href=re.compile(r'/events/\d+')):
                 title_text = a_tag.get_text(strip=True)
                 if title_text and len(title_text) > 5 and "PRV" not in title_text:
+                    # Clean dictionary structure closing bracket error resolved here
                     events.append({
                         "title": title_text,
                         "venue": venue_name,
                         "country": country,
+                        "genre": "Techno",  
+                        "date": "Upcoming Lineup",
+                        "ticket_url": f"https://ra.co{a_tag['href']}"
+                    })
+    except Exception:
+        pass
+    return events
+
+@st.cache_data(ttl=14400) 
+def load_all_automated_events(venues_list):
+    compiled_events = []
+    for ra_id, name, country in venues_list:
+        if ra_id:
+            compiled_events.extend(fetch_single_ra_venue(ra_id, name, country))
+    return compiled_events
+
+# --- TAB 1: UPCOMING RAVES ---
+with tabs[0]:
+    st.subheader("Live Lineups & Parties")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        country_filter = st.selectbox("Filter Country", ["All Countries"] + COUNTRIES_LIST)
+    with col2:
+        genre_filter = st.selectbox("Filter Genre/Sound", ["All Genres"] + GENRES_LIST)
+        
+    conn = sqlite3.connect(DB_NAME)
+    manual_df = pd.read_sql_query("SELECT title, venue, country, genre, date, ticket_url FROM manual_events", conn)
+    venues_to_scan = conn.execute("SELECT resident_advisor_id, name, country FROM venues WHERE resident_advisor_id != ''").fetchall()
+    conn.close()
+    
+    live_events = load_all_automated_events(venues_to_scan)
+    all_events = live_events + manual_df.to_dict(orient='records')
+    
+    seen_links = set()
+    display_count = 0
+    
+    for ev in all_events:
+        if ev['ticket_url'] in seen_links:
+            continue
+        if country_filter != "All Countries" and ev['country'] != country_filter:
+            continue
+            
+        # Smart Text-Matching Genre Overrides
+        if genre_filter != "All Genres":
+            title_clean = ev['title'].lower()
+            filter_clean = genre_filter.lower()
+            base_filter = filter_clean.split('(')[0].strip()
+            
+            if ev['genre'] != genre_filter and base_filter not in title_clean:
+                continue
+            
+        seen_links.add(ev['ticket_url'])
+        display_count += 1
+        
+        st.markdown(f"""
+            <div class="event-card">
+                <span style="float:right; background:#bc34fa; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:bold; color:white; margin-left:5px;">{ev['country']}</span>
+                <span style="float:right; background:#333; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:bold; color:#00ffcc;">{ev['genre']}</span>
+                <strong style="font-size:18px; color:#ffffff;">{ev['title']}</strong><br>
+                <span style="color:#aaaaaa;">📍 {ev['venue']}</span> • <span style="color:#bc34fa; font-weight:bold;">📅 {ev['date']}</span>
+            </div>
+        """, unsafe_allow_html=True)
+        st.link_button("Get Event Info / Tickets", ev['ticket_url'])
+
+    if display_count == 0:
+        st.info("No active events found matching those exact filters. Head to the 'Add' tab to publish one!")
+
+# --- TAB 2: VENUE DIRECTORY ---
+with tabs[1]:
+    st.subheader("Tracked Collectives & Club Hubs")
+    conn = sqlite3.connect(DB_NAME)
+    venues_df = pd.read_sql_query("SELECT name as 'Name', country as 'Base Country', resident_advisor_id as 'RA System ID' FROM venues ORDER BY country ASC", conn)
+    conn.close()
+    st.dataframe(venues_df, use_container_width=True, hide_index=True)
+
+# --- TAB 3: ADD EVENT / VENUE ---
+with tabs[2]:
+    st.subheader("Expand the Radar")
+    option = st.radio("What do you want to add?", ["Single Event Announcement", "Permanent Club/Organizer Profile"])
+    
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    
+    if option == "Single Event Announcement":
+        with st.form("event_form", clear_on_submit=True):
+            t = st.text_input("Event Name (e.g., Verknipt KL / Joyhauser Extended)")
+            v = st.text_input("Venue & Location Details (e.g., Tuff Club, Singapore)")
+            c = st.selectbox("Country Location", COUNTRIES_LIST)
+            g = st.selectbox("Primary Sound/Genre", GENRES_LIST)
+            d = st.date_input("Event Date")
+            link = st.text_input("Direct Ticket / Checkout URL")
+            
+            if st.form_submit_button("Publish Event to Public Radar"):
+                if t and v and link:
+                    cursor.execute("INSERT INTO manual_events (title, venue, country, genre, date, ticket_url) VALUES (?,?,?,?,?,?)", (t, v, c, g, str(d), link))
+                    conn.commit()
+                    st.success("🎉 Event successfully uploaded and categorized!")
+                    st.clear_cache() 
+                    st.rerun()
+                    
+    else:
+        with st.form("venue_form", clear_on_submit=True):
+            name = st.text_input("Club or Promoter Name")
+            country = st.selectbox("Base Country", COUNTRIES_LIST)
+            ra_id = st.text_input("Resident Advisor Club ID Number")
+            st.caption("Tip: If the web address is ra.co/clubs/154508, the ID number is 154508.")
+            
+            if st.form_submit_button("Add Venue to Tracker"):
+                if name:
+                    cursor.execute("INSERT INTO venues (name, country, resident_advisor_id) VALUES (?,?,?)", (name, country, ra_id))
+                    conn.commit()
+                    st.success(f"Successfully added {name} to the core scanning rotation!")
+                    st.clear_cache()
+                    st.rerun()
+                    
+    conn.close()
