@@ -1,4 +1,4 @@
-import streamlit as st
+ import streamlit as st
 import sqlite3
 import pandas as pd
 import requests
@@ -18,8 +18,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Incremented to v4 to support the new primary Genre column tracking
-DB_NAME = "raveradar_v4.db"
+# Incremented database name to load all the new regional pre-sets
+DB_NAME = "raveradar_final.db"
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
@@ -35,9 +35,46 @@ def init_db():
     
     cursor.execute("SELECT COUNT(*) FROM venues")
     if cursor.fetchone()[0] == 0:
+        # Full master regional network hardcoded right into the database foundation
         defaults = [
-            ('Headquarters', 'Singapore', '109556'),
-            ('Tuff Club', 'Singapore', '154508')
+            # Singapore
+            ('Headquarters', 'Singapore', '119385'),
+            ('Tuff Club', 'Singapore', '154508'),
+            ('Mdlr', 'Singapore', '220686'),
+            ('RASA', 'Singapore', '231502'),
+            ('Wild Pearl', 'Singapore', '221487'),
+            
+            # Malaysia
+            ('The Crane KL', 'Malaysia', '222135'),
+            ('Over & Above KL', 'Malaysia', '226012'),
+            ('Pisco Bar', 'Malaysia', '62181'),
+            ('Wet Deck (W Hotel)', 'Malaysia', '163539'),
+            
+            # Thailand
+            ('Mustache Bar (Bangkok)', 'Thailand', '102144'),
+            ('Decommune (Bangkok)', 'Thailand', '198547'),
+            ('Never Say Never (BKK)', 'Thailand', '217035'),
+            ('Sing Sing Theater', 'Thailand', '108390'),
+            
+            # Indonesia
+            ('Klymax Discotheque', 'Indonesia', '218451'),
+            ('Vault Bali', 'Indonesia', '173003'),
+            ('Red Ruby (Bali)', 'Indonesia', '137976'),
+            ('Zodiac Jakarta', 'Indonesia', '176219'),
+            
+            # Japan
+            ('WOMB (Tokyo)', 'Japan', '1643'),
+            ('VENT (Tokyo)', 'Japan', '116035'),
+            ('Circus Tokyo', 'Japan', '105191'),
+            ('Ohjo Bldg (Shinjuku)', 'Japan', '221957'),
+            ('Enter Shibuya', 'Japan', '214227'),
+            
+            # South Korea
+            ('Faust (Itaewon)', 'South Korea', '106806'),
+            ('vurt.', 'South Korea', '96227'),
+            ('Atelier Space', 'South Korea', '244226'),
+            ('Flac Seoul', 'South Korea', '284350'),
+            ('Volnost', 'South Korea', '132644')
         ]
         cursor.executemany("INSERT INTO venues (name, country, resident_advisor_id) VALUES (?,?,?)", defaults)
     conn.commit()
@@ -60,7 +97,6 @@ GENRES_LIST = [
 ]
 
 def fetch_live_ra_events(ra_id, venue_name, country):
-    """Safely reads the Resident Advisor club endpoint to pull real listings."""
     events = []
     if not ra_id:
         return events
@@ -80,7 +116,7 @@ def fetch_live_ra_events(ra_id, venue_name, country):
                         "title": title_text,
                         "venue": venue_name,
                         "country": country,
-                        "genre": "Techno",  # Default classification for RA venue pulls
+                        "genre": "Techno",  
                         "date": "Upcoming Lineup",
                         "ticket_url": full_url
                     })
@@ -92,27 +128,21 @@ def fetch_live_ra_events(ra_id, venue_name, country):
 with tabs[0]:
     st.subheader("Live Lineups & Parties")
     
-    # Dual Filters on a single row layout
     col1, col2 = st.columns(2)
     with col1:
         country_filter = st.selectbox("Filter Country", ["All Countries"] + COUNTRIES_LIST)
     with col2:
         genre_filter = st.selectbox("Filter Genre/Sound", ["All Genres"] + GENRES_LIST)
         
-    # 1. Fetch Manual Crowdsourced Submissions from DB
     conn = sqlite3.connect(DB_NAME)
     manual_df = pd.read_sql_query("SELECT title, venue, country, genre, date, ticket_url FROM manual_events", conn)
-    
-    # 2. Query all Tracked venues from the Directory
     venues_to_scan = conn.execute("SELECT resident_advisor_id, name, country FROM venues WHERE resident_advisor_id != ''").fetchall()
     conn.close()
     
-    # 3. Pull Live Data
     live_events = []
     for ra_id, v_name, v_country in venues_to_scan:
         live_events.extend(fetch_live_ra_events(ra_id, v_name, v_country))
         
-    # Combine live automation data with manual dashboard submissions
     all_events = live_events + manual_df.to_dict(orient='records')
     
     seen_links = set()
@@ -171,12 +201,12 @@ with tabs[2]:
                 if t and v and link:
                     cursor.execute("INSERT INTO manual_events (title, venue, country, genre, date, ticket_url) VALUES (?,?,?,?,?,?)", (t, v, c, g, str(d), link))
                     conn.commit()
-                    st.success("🎉 Event successfully uploaded and categorized! Go check the main feed.")
+                    st.success("🎉 Event successfully uploaded and categorized!")
                     st.balloons()
                     
     else:
         with st.form("venue_form", clear_on_submit=True):
-            name = st.text_input("Club or Promoter Name (e.g., Mustache / Thug Shop)")
+            name = st.text_input("Club or Promoter Name")
             country = st.selectbox("Base Country", COUNTRIES_LIST)
             ra_id = st.text_input("Resident Advisor Club ID Number")
             st.caption("Tip: If the web address is ra.co/clubs/154508, the ID number is 154508.")
@@ -185,6 +215,6 @@ with tabs[2]:
                 if name:
                     cursor.execute("INSERT INTO venues (name, country, resident_advisor_id) VALUES (?,?,?)", (name, country, ra_id))
                     conn.commit()
-                    st.success(f"Successfully added {name} to the backend automated scan loop!")
+                    st.success(f"Successfully added {name} to the core scanning rotation!")
                     
     conn.close()
